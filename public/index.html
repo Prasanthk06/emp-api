@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Employee Management</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:950px;margin:20px auto;padding:0 10px}
+input,select,button{padding:6px;margin:3px}
+table{border-collapse:collapse;width:100%;margin-top:10px}
+th,td{border:1px solid #999;padding:6px;text-align:left}
+th{background:#eee}
+#msg{margin:10px 0;font-weight:bold}
+.err{color:#b00}.ok{color:#060}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<h2>Employee Management</h2>
+<div id="msg"></div>
+
+<div id="authBox">
+  <h3>Login / Register</h3>
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password (min 8)">
+  <button onclick="login()">Login</button>
+  <button onclick="register()">Register</button>
+</div>
+
+<div id="appBox" class="hidden">
+  <p>Logged in as <b id="who"></b> (<b id="role"></b>) <button onclick="logout()">Logout</button></p>
+
+  <div id="formBox">
+    <h3 id="formTitle">Add Employee</h3>
+    <input type="hidden" id="eid">
+    <input id="name" placeholder="Name">
+    <input id="eemail" placeholder="Email">
+    <input id="department" placeholder="Department">
+    <input id="designation" placeholder="Designation">
+    <input id="salary" type="number" placeholder="Salary">
+    <input id="joining_date" type="date">
+    <select id="status"><option>Active</option><option>Inactive</option><option>On Leave</option></select>
+    <button onclick="save()">Save</button>
+    <button onclick="resetForm()">Clear</button>
+  </div>
+
+  <h3>Employees</h3>
+  <table>
+    <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th><th>Designation</th><th>Salary</th><th>Joined</th><th>Status</th><th class="adm">Actions</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <button onclick="go(-1)">Prev</button>
+  <span id="pageInfo"></span>
+  <button onclick="go(1)">Next</button>
+   
+  <h3>Top 3 Customers</h3>
+<button onclick="topCustomers()">Load</button>
+<table><thead><tr><th>Name</th><th>Total Orders</th><th>Total Amount</th></tr></thead><tbody id="topRows"></tbody></table>
+
+<div class="adm">
+  <h3>External Sync</h3>
+  <button onclick="syncPosts()">Sync posts from JSONPlaceholder</button>
+  <span id="syncMsg"></span>
+</div>
+
+
+</div>
+
+
+<script>
+let page = 1, limit = 10, total = 0, current = []
+const $ = id => document.getElementById(id)
+
+function show(text, ok) {
+  $('msg').textContent = text
+  $('msg').className = ok ? 'ok' : 'err'
+}
+
+async function api(url, method = 'GET', body) {
+  const headers = { 'Content-Type': 'application/json' }
+  const t = localStorage.getItem('token')
+  if (t) headers.Authorization = 'Bearer ' + t
+  const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  const data = r.status === 204 ? null : await r.json().catch(() => null)
+  if (r.status === 401 && t) { logout(); throw new Error('Session expired, login again') }
+  if (!r.ok) {
+    const d = data && data.details
+    throw new Error(d ? d.map(x => (x.field || (x.path || []).join('.')) + ': ' + x.message).join(', ') : (data && data.error) || 'Error')
+  }
+  return data
+}
+
+function creds() { return { email: $('email').value, password: $('password').value } }
+
+async function register() {
+  try { await api('/auth/register', 'POST', creds()); show('Registered. Now login.', true) }
+  catch (e) { show(e.message) }
+}
+
+async function login() {
+  try {
+    const d = await api('/auth/login', 'POST', creds())
+    localStorage.setItem('token', d.token)
+    start()
+  } catch (e) { show(e.message) }
+}
+
+function logout() {
+  localStorage.removeItem('token')
+  $('appBox').classList.add('hidden')
+  $('authBox').classList.remove('hidden')
+}
+
+function user() {
+  try { return JSON.parse(atob(localStorage.getItem('token').split('.')[1])) } catch { return null }
+}
+
+function start() {
+  const u = user()
+  if (!u) return logout()
+  $('who').textContent = u.email
+  $('role').textContent = u.role
+  const admin = u.role === 'admin'
+  $('formBox').classList.toggle('hidden', !admin)
+  document.querySelectorAll('.adm').forEach(e => e.classList.toggle('hidden', !admin))
+  $('authBox').classList.add('hidden')
+  $('appBox').classList.remove('hidden')
+  show('')
+  load()
+}
+
+async function load() {
+  try {
+    const d = await api(`/employees?page=${page}&limit=${limit}`)
+    total = d.total
+    current = d.data
+    const admin = user().role === 'admin'
+    $('rows').innerHTML = d.data.map(e => `<tr>
+      <td>${e.employee_id}</td><td>${e.name}</td><td>${e.email}</td><td>${e.department}</td>
+      <td>${e.designation || ''}</td><td>${e.salary}</td><td>${e.joining_date ? String(e.joining_date).slice(0, 10) : ''}</td><td>${e.status}</td>
+      <td class="adm ${admin ? '' : 'hidden'}"><button onclick="edit(${e.employee_id})">Edit</button><button onclick="del(${e.employee_id})">Delete</button></td>
+    </tr>`).join('')
+    $('pageInfo').textContent = `Page ${page} of ${Math.max(Math.ceil(total / limit), 1)} (${total} records)`
+  } catch (e) { show(e.message) }
+}
+
+function go(n) {
+  const max = Math.max(Math.ceil(total / limit), 1)
+  page = Math.min(Math.max(page + n, 1), max)
+  load()
+}
+
+function body() {
+  const b = {
+    name: $('name').value, email: $('eemail').value, department: $('department').value,
+    salary: Number($('salary').value), status: $('status').value
+  }
+  if ($('designation').value) b.designation = $('designation').value
+  if ($('joining_date').value) b.joining_date = $('joining_date').value
+  return b
+}
+
+async function save() {
+  const id = $('eid').value
+  try {
+    if (id) await api('/employees/' + id, 'PUT', body())
+    else await api('/employees', 'POST', body())
+    show(id ? 'Employee updated' : 'Employee added', true)
+    resetForm()
+    load()
+  } catch (e) { show(e.message) }
+}
+
+function edit(id) {
+  const e = current.find(x => x.employee_id === id)
+  $('eid').value = id
+  $('name').value = e.name
+  $('eemail').value = e.email
+  $('department').value = e.department
+  $('designation').value = e.designation || ''
+  $('salary').value = e.salary
+  $('joining_date').value = e.joining_date ? String(e.joining_date).slice(0, 10) : ''
+  $('status').value = e.status
+  $('formTitle').textContent = 'Edit Employee #' + id
+  window.scrollTo(0, 0)
+}
+
+function resetForm() {
+  ['eid', 'name', 'eemail', 'department', 'designation', 'salary', 'joining_date'].forEach(i => $(i).value = '')
+  $('status').value = 'Active'
+  $('formTitle').textContent = 'Add Employee'
+}
+
+async function del(id) {
+  if (!confirm('Delete employee ' + id + '?')) return
+  try { await api('/employees/' + id, 'DELETE'); show('Employee deleted', true); load() }
+  catch (e) { show(e.message) }
+}
+
+async function topCustomers() {
+  try {
+    const d = await api('/reports/top-customers')
+    $('topRows').innerHTML = d.map(r => `<tr><td>${r.name}</td><td>${r.total_orders}</td><td>${r.total_purchase_amount}</td></tr>`).join('')
+  } catch (e) { show(e.message) }
+}
+
+async function syncPosts() {
+  $('syncMsg').textContent = 'Syncing...'
+  try {
+    const d = await api('/sync/posts', 'POST')
+    $('syncMsg').textContent = `Fetched ${d.fetched}, new ${d.inserted}, skipped ${d.skipped}, total in DB ${d.total_in_db}`
+  } catch (e) { $('syncMsg').textContent = e.message }
+}
+
+if (localStorage.getItem('token')) start()
+</script>
+</body>
+</html>
