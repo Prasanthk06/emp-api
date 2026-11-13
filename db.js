@@ -1,10 +1,9 @@
 const db = require("mysql2/promise")
 require('dotenv').config
 const pool = db.createPool({
-     host: process.env.DB_HOST,
-     user: process.env.DB_USER,
-     password: process.env.DB_PASSWORD,
-     database: process.env.DB_NAME,
-     connectionLimit: 10
+    host:"localhost",
+    user:"root",
+    password:"Prashanth5319",
+    database:"employee"
 })
 module.exports = pool
